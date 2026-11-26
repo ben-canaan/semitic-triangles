@@ -1,0 +1,46 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Warm parchment by day, lamplit ink by night. */
+:root {
+  --background: 40 33% 96%;
+  --foreground: 30 10% 15%;
+  --card: 40 30% 98%;
+  --primary: 15 60% 45%;
+  --primary-foreground: 40 33% 96%;
+  --secondary: 35 20% 90%;
+  --muted: 35 15% 92%;
+  --muted-foreground: 30 10% 45%;
+  --destructive: 0 70% 45%;
+  --border: 35 20% 85%;
+  --input: 35 20% 85%;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: 30 15% 8%;
+    --foreground: 40 20% 92%;
+    --card: 30 12% 12%;
+    --primary: 20 65% 55%;
+    --primary-foreground: 30 15% 8%;
+    --secondary: 30 10% 18%;
+    --muted: 30 10% 18%;
+    --muted-foreground: 35 15% 60%;
+    --destructive: 0 70% 60%;
+    --border: 30 10% 22%;
+    --input: 30 10% 22%;
+    color-scheme: dark;
+  }
+}
+
+* { @apply border-border; }
+
+html, body, #root { height: 100%; }
+
+body {
+  @apply bg-background text-foreground font-body;
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior: none;
+}
