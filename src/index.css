@@ -19,7 +19,7 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --background: 30 15% 8%;
     --foreground: 40 20% 92%;
     --card: 30 12% 12%;
@@ -33,6 +33,22 @@
     --input: 30 10% 22%;
     color-scheme: dark;
   }
+}
+
+/* An explicit theme choice wins over the system setting. */
+:root[data-theme="dark"] {
+    --background: 30 15% 8%;
+    --foreground: 40 20% 92%;
+    --card: 30 12% 12%;
+    --primary: 20 65% 55%;
+    --primary-foreground: 30 15% 8%;
+    --secondary: 30 10% 18%;
+    --muted: 30 10% 18%;
+    --muted-foreground: 35 15% 60%;
+    --destructive: 0 70% 60%;
+    --border: 30 10% 22%;
+    --input: 30 10% 22%;
+    color-scheme: dark;
 }
 
 * { @apply border-border; }
