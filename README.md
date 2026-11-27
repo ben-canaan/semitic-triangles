@@ -22,3 +22,12 @@ no root may be played twice.
 
 Netlify: connect this repo; `netlify.toml` has the build settings.
 Game logic lives in `src/lib/triangles.ts`; the interface in `src/App.tsx`.
+
+## Root dictionary
+
+`src/data/roots.json` is built by `scripts/build_lexicon.py` from Wiktionary
+(via kaikki.org, CC BY-SA 4.0), Brown-Driver-Briggs (Open Scriptures Hebrew
+Bible Project, CC BY 4.0) and Lane's Arabic-English Lexicon (Perseus Digital
+Library); the script's docstring lists the downloads. `scripts/check_lexicon.py`
+checks the result against a list of common Hebrew and Arabic roots. The
+dictionary only advises: roots it doesn't know can still be played.
