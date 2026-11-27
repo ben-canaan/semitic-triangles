@@ -430,9 +430,6 @@ const App = () => {
               <blockquote className="font-display italic text-sm sm:text-lg lg:text-xl leading-snug text-foreground/60">
                 in the beginning was<br />the three-letter root<br />which unfolded like protein<br />ripe for diverse expression
               </blockquote>
-              <figcaption className="mt-1.5 sm:mt-2 text-[9.5px] sm:text-[11px] tracking-wide text-muted-foreground font-body">
-                — Josh Lipson, “Aqui fazem-se milagres, no metal”
-              </figcaption>
             </div>
           </figure>
         )}
