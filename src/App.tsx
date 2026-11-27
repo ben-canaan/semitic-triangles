@@ -424,8 +424,9 @@ const App = () => {
         />
         {/* An epigraph for a fresh board; it leaves with the first root. Taps pass through. */}
         {loaded && game.moves.length === 0 && !selected && (
-          <figure className="absolute inset-x-0 bottom-[14%] px-6 text-center pointer-events-none select-none epigraph">
-            <div className="inline-block rounded-xl px-6 py-4 bg-background/80 backdrop-blur-[2px]">
+          <figure className="absolute right-14 max-w-[calc(100%-4.5rem)] text-right pointer-events-none select-none epigraph"
+            style={{ bottom: "max(0.75rem, env(safe-area-inset-bottom))" }}>
+            <div className="inline-block rounded-xl px-4 py-3 bg-background/80 backdrop-blur-[2px]">
               <blockquote className="font-display italic text-lg lg:text-xl leading-snug text-foreground/60">
                 in the beginning was<br />the three-letter root<br />which unfolded like protein<br />ripe for diverse expression
               </blockquote>
