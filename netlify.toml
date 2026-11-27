@@ -5,6 +5,13 @@
 [build.environment]
   NODE_VERSION = "20"
 
+# Send the www address to the main domain.
+[[redirects]]
+  from = "https://www.semitictriangles.com/*"
+  to = "https://semitictriangles.com/:splat"
+  status = 301
+  force = true
+
 # Single-page app: every path serves the game.
 [[redirects]]
   from = "/*"
