@@ -32,6 +32,7 @@ ap.add_argument("--kaikki-arabic")
 ap.add_argument("--bdb")
 ap.add_argument("--lane")
 ap.add_argument("--out", required=True)
+ap.add_argument("--words-dir", help="also write words-he.json and words-ar.json (the root explorer) here")
 args = ap.parse_args()
 
 # ----------------------------------------------------------------- letters
@@ -176,6 +177,56 @@ def wiktionary(path, lang):
     return out
 
 
+def form(entry, tag):
+    for f in entry.get("forms", []):
+        if tag in (f.get("tags") or []):
+            return f.get("form")
+    return None
+
+
+def wiktionary_words(path, lang, per_root=10):
+    """root -> [[vocalized word, romanization, part of speech, gloss], ...] for the root explorer."""
+    prefix = "Hebrew terms belonging to the root " if lang == "he" else "Arabic terms belonging to the root "
+    to_root = heb_root if lang == "he" else ar_root
+    found = {}
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            e = json.loads(line)
+            pos = e.get("pos")
+            if pos not in ("verb", "noun", "adj", "adv"):
+                continue
+            roots = {to_root(c[len(prefix):]) for c in categories(e) if c.startswith(prefix)}
+            if lang == "ar":
+                for t in e.get("etymology_templates", []):
+                    if t.get("name") in ("ar-rootbox", "ar-root"):
+                        roots.add(ar_root((t.get("args") or {}).get("1", "")))
+            bare = to_root(e.get("word", ""))
+            if not roots and pos == "verb" and len(bare) == 3:
+                roots.add(bare)
+            roots = {r for r in roots if len(r) == 3}
+            if not roots:
+                continue
+            g = first_gloss(e)
+            if not g:
+                continue
+            word = form(e, "canonical") or e["word"]
+            rom = form(e, "romanization") or ""
+            for r in roots:
+                lst = found.setdefault(r, [])
+                if len(lst) < 40 and not any(w[0] == word for w in lst):
+                    lst.append([word, rom, pos, tidy(g, 60), candidate_rank(e, lang, r)])
+    out = {}
+    for r, lst in found.items():
+        lst.sort(key=lambda w: w[4])
+        # A mix: the root's main verbs, then the nouns and adjectives built on it.
+        verbs = [w for w in lst if w[2] == "verb"][:4]
+        others = [w for w in lst if w[2] != "verb"]
+        pick = verbs + others[: per_root - len(verbs)]
+        pick += [w for w in lst if w not in pick][: per_root - len(pick)]
+        out[r] = [w[:4] for w in pick]
+    return out
+
+
 # ---------------------------------------------------------- BDB and Lane
 def clean(t):
     t = re.sub(r"<[^>]+>", "", t)
@@ -308,6 +359,15 @@ data = {
     "arc": dict(sorted(arc.items())),
     "ar": dict(sorted(ar.items())),
 }
+if args.words_dir:
+    for lang, path in (("he", args.kaikki_hebrew), ("ar", args.kaikki_arabic)):
+        if path:
+            words = wiktionary_words(path, lang)
+            with open(f"{args.words_dir}/words-{lang}.json", "w", encoding="utf-8") as f:
+                json.dump({"_source": "Wiktionary (https://en.wiktionary.org), via kaikki.org, CC BY-SA 4.0.",
+                           "words": dict(sorted(words.items()))}, f, ensure_ascii=False, separators=(",", ":"))
+            counts[f"words-{lang}"] = len(words)
+
 with open(args.out, "w", encoding="utf-8") as f:
     json.dump(data, f, ensure_ascii=False, separators=(",", ":"))
 print(counts, {k: len(v) for k, v in data.items() if k != "_source"})

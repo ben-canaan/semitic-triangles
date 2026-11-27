@@ -7,6 +7,8 @@ import path from "path";
 export default defineConfig({
   plugins: [react()],
   resolve: { alias: { "@": path.resolve(__dirname, "./src") } },
+  // FUNCTIONS_URL=http://127.0.0.1:9999 lets the dev server reach `netlify functions:serve`.
+  server: process.env.FUNCTIONS_URL ? { proxy: { "/.netlify/functions": process.env.FUNCTIONS_URL } } : undefined,
   build: {
     rollupOptions: { output: { inlineDynamicImports: process.env.SINGLE_FILE === "1" } },
   },

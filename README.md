@@ -10,7 +10,8 @@ that meet there. A new root must fit the letters already on its corners, and
 no root may be played twice.
 
 - Hebrew/Paleo-Hebrew (22 letters, switchable script) or Arabic (28 letters)
-- 1-4 players on one device; trade moves remotely with a game link
+- 1-4 players on one device, or 2-4 online: share a link, each player takes a seat, moves appear on everyone's board
+- Hints from the root dictionary, a full-point bonus for completing all six triangles around a letter, and a root explorer listing words built on each root
 - Installable as a phone/desktop app ("Add to Home Screen"), works offline
 
 ## Develop
@@ -31,3 +32,11 @@ Bible Project, CC BY 4.0) and Lane's Arabic-English Lexicon (Perseus Digital
 Library); the script's docstring lists the downloads. `scripts/check_lexicon.py`
 checks the result against a list of common Hebrew and Arabic roots. The
 dictionary only advises: roots it doesn't know can still be played.
+
+## Online play
+
+`netlify/functions/game.mts` stores each online game in Netlify Blobs and
+applies moves with the same rules as the board (`applyAction` in
+`src/lib/triangles.ts`). Browsers check for new moves every two seconds.
+To run it locally: `netlify functions:serve --port 9999` in one terminal,
+then `FUNCTIONS_URL=http://127.0.0.1:9999 npm run dev`.

@@ -150,7 +150,7 @@ export const ARABIC_TO_CANAANITE: Record<string, string> = {
   ش: "ש", ت: "ת", ث: "ש", خ: "ח", ذ: "ז", ض: "צ", ظ: "צ", غ: "ע",
 };
 // The 22 into Arabic: the abjad correspondences.
-const CANAANITE_TO_ARABIC: Record<string, string> = {
+export const CANAANITE_TO_ARABIC: Record<string, string> = {
   א: "ء", ב: "ب", ג: "ج", ד: "د", ה: "ه", ו: "و", ז: "ز", ח: "ح", ט: "ط", י: "ي",
   כ: "ك", ל: "ل", מ: "م", נ: "ن", ס: "س", ע: "ع", פ: "ف", צ: "ص", ק: "ق", ר: "ر",
   ש: "ش", ת: "ت",
@@ -319,6 +319,96 @@ export const checkRoot = (game: Game, board: Board, tri: Tri, root: string[]): V
 export const scores = (game: Game) =>
   game.players.map((_, i) => game.moves.filter((m) => m.player === i).length);
 
+// ------------------------------------------------------------ full points
+
+/** Points for completing a star: all six triangles around one letter. */
+export const STAR_BONUS = 2;
+
+export type Star = { vertex: string; player: number; move: number };
+
+/**
+ * Letters whose six surrounding triangles are all filled. The player who
+ * laid the sixth triangle completes the star and takes the bonus.
+ */
+export const starsOf = (game: Game): Star[] => {
+  const claimed = new Map(game.moves.map((m, i) => [m.tri, i]));
+  const seen = new Set<string>();
+  const stars: Star[] = [];
+  for (const m of game.moves) {
+    for (const v of triVerts(parseTri(m.tri))) {
+      const k = vKey(v);
+      if (seen.has(k)) continue;
+      seen.add(k);
+      const idx = trisAround(v).map((t) => claimed.get(tKey(t)));
+      if (idx.every((i) => i !== undefined)) {
+        const last = Math.max(...(idx as number[]));
+        stars.push({ vertex: k, player: game.moves[last].player, move: last });
+      }
+    }
+  }
+  return stars.sort((a, b) => a.move - b.move);
+};
+
+export type Score = { roots: number; stars: number; points: number };
+
+export const scoreboard = (game: Game): Score[] => {
+  const stars = starsOf(game);
+  return game.players.map((_, i) => {
+    const roots = game.moves.filter((m) => m.player === i).length;
+    const st = stars.filter((s) => s.player === i).length;
+    return { roots, stars: st, points: roots + STAR_BONUS * st };
+  });
+};
+
+/** Stars completed by one particular move. */
+export const starsMadeBy = (game: Game, moveIndex: number) =>
+  starsOf(game).filter((s) => s.move === moveIndex);
+
+// ------------------------------------------------------------------ moves
+
+export type Action =
+  | { type: "place"; tri: string; root: string[]; corners: string[]; gloss?: string; lang?: string }
+  | { type: "pass" }
+  | { type: "undo" };
+
+/**
+ * Apply one action for one player. Used by the board itself and, for games
+ * played online, by the server, so both enforce the same rules.
+ */
+export const applyAction = (game: Game, player: number, action: Action): { game?: Game; error?: string } => {
+  const n = game.players.length;
+  if (player < 0 || player >= n) return { error: "No such seat." };
+  if (action.type === "undo") {
+    const last = game.moves[game.moves.length - 1];
+    if (!last) return { error: "Nothing to undo." };
+    if (last.player !== player) return { error: "Only the player who laid the last root can take it back." };
+    return { game: { ...game, moves: game.moves.slice(0, -1), turn: last.player } };
+  }
+  if (game.turn % n !== player) return { error: `It's ${game.players[game.turn % n].name}'s turn.` };
+  if (action.type === "pass") return { game: { ...game, turn: (game.turn + 1) % n } };
+  if (action.type !== "place") return { error: "Unknown move." };
+  const { tri, root, corners } = action;
+  const ids = new Set(ALPHABETS[game.alphabet].letters.map((l) => l.id));
+  if (!/^-?\d+,-?\d+,[01]$/.test(tri) || !Array.isArray(root) || !Array.isArray(corners)) return { error: "That move is malformed." };
+  if (root.length !== 3 || corners.length !== 3 || ![...root, ...corners].every((l) => ids.has(l)))
+    return { error: "A root is three letters of this game's alphabet." };
+  const board = boardOf(game);
+  const t = parseTri(tri);
+  const v = checkRoot(game, board, t, root);
+  if (!v.ok) return { error: v.reason };
+  const fits = arrangements(fixedCorners(board, t), root).some((a) => a.join("") === corners.join(""));
+  if (!fits) return { error: "Those letters don't sit on the corners that way." };
+  const gloss = typeof action.gloss === "string" ? action.gloss.slice(0, 120) : "";
+  const lang = typeof action.lang === "string" ? action.lang.slice(0, 40) : "";
+  return {
+    game: {
+      ...game,
+      moves: [...game.moves, { tri, root, corners, gloss, ...(lang ? { lang } : {}), player }],
+      turn: (player + 1) % n,
+    },
+  };
+};
+
 // ------------------------------------------------------------ persistence
 
 const isGame = (g: unknown): g is Game => {
@@ -426,4 +516,52 @@ export const lookupRoot = (idx: RootIndex, root: string[]) => {
     if (s) otherOrders.push({ root: r, senses: s });
   }
   return { senses, otherOrders };
+};
+
+/** Dictionary roots that would fit a triangle and haven't been played, best known first. */
+export const hintsFor = (idx: RootIndex, fixed: (string | null)[], used: Set<string>, limit = 8) => {
+  const out: { root: string[]; senses: RootSense[] }[] = [];
+  for (const [k, senses] of idx) {
+    if (used.has(k)) continue;
+    const root = [...k];
+    if (root.length !== 3) continue;
+    if (arrangements(fixed, root).length) out.push({ root, senses });
+  }
+  out.sort((a, b) => b.senses.length - a.senses.length);
+  return out.slice(0, limit);
+};
+
+// ---------------------------------------------------------- root explorer
+
+/** [vocalized word, romanization, part of speech, meaning] */
+export type Word = [string, string, string, string];
+export type WordList = { words: Record<string, Word[]> };
+export type RootFamily = { lang: "Hebrew" | "Arabic"; words: Word[] };
+
+/** Words built on a root, from Wiktionary, for the game's alphabet. */
+export const wordsFor = (he: WordList | null, ar: WordList | null, alphabet: AlphabetId, root: string[]): RootFamily[] => {
+  const out: RootFamily[] = [];
+  const key = root.join("");
+  if (alphabet === "arabic") {
+    const a = ar?.words[key];
+    if (a) out.push({ lang: "Arabic", words: a });
+    // Arabic letter -> Hebrew letter, reversing the table used for typing.
+    const toHe = Object.fromEntries(Object.entries(CANAANITE_TO_ARABIC).map(([h, x]) => [x, h]));
+    toHe["س"] = "ש";
+    const hk = root.map((l) => toHe[l] ?? ARABIC_TO_CANAANITE[l]).join("");
+    const h = he?.words[hk];
+    if (h) out.push({ lang: "Hebrew", words: h });
+  } else {
+    const h = he?.words[key];
+    if (h) out.push({ lang: "Hebrew", words: h });
+    if (ar) {
+      for (const [k, words] of Object.entries(ar.words)) {
+        if ([...k].map((l) => ARABIC_TO_CANAANITE[l]).join("") === key) {
+          out.push({ lang: "Arabic", words });
+          break;
+        }
+      }
+    }
+  }
+  return out;
 };

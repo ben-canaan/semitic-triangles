@@ -1,16 +1,38 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
-  Crosshair, ExternalLink, Link2, Minus, Plus, RotateCw, SkipForward, Undo2, X,
+  BookOpen, Crosshair, ExternalLink, Globe, Lightbulb, Link2, Minus, Plus, RotateCw, SkipForward, Star as StarIcon, Undo2, X,
 } from "lucide-react";
 import {
-  ALPHABETS, AlphabetId, Game, H, LANGUAGES, Lexicon, RootSense, buildRootIndex, lookupRoot, SCRIPT_FONT, SCRIPT_LABEL, ScriptId, Tri,
+  ALPHABETS, AlphabetId, Action, Game, H, LANGUAGES, Lexicon, RootIndex, RootSense, STAR_BONUS, WordList, applyAction, buildRootIndex,
+  hintsFor, lookupRoot, scoreboard, starsOf, wordsFor, SCRIPT_FONT, SCRIPT_LABEL, ScriptId, Tri,
   arrangements, boardOf, canPlayAt, checkRoot, decodeGame, encodeGame, fixedCorners, glyph,
-  letterFromKey, newGame, parseStoredGame, parseTri, scores, tKey, translit, triAt, triCentroid,
+  letterFromKey, newGame, parseStoredGame, parseTri, tKey, translit, triAt, triCentroid,
   triVerts, vPos,
 } from "@/lib/triangles";
 
 const STORAGE_KEY = "semitic-triangles:game";
+const SEAT_KEY = (id: string) => `semitic-triangles:seat:${id}`;
+const API = "/.netlify/functions/game";
+
+/** An online game this browser is looking at; seat and token only if it holds a seat. */
+type Online = { id: string; version: number; seated: number[]; seat: number | null; token: string | null };
+type ServerView = { id: string; game: Game; version: number; seated: number[]; seat?: number; token?: string; error?: string };
+
+const api = async (query: string, body?: unknown): Promise<{ ok: boolean; status: number; data: ServerView }> => {
+  const res = await fetch(`${API}${query}`, body === undefined
+    ? { cache: "no-store" }
+    : { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  const data = await res.json().catch(() => ({ error: "The game server didn't answer." }));
+  return { ok: res.ok, status: res.status, data };
+};
+
+const readSeat = (id: string): { seat: number; token: string } | null => {
+  try { return JSON.parse(localStorage.getItem(SEAT_KEY(id)) ?? "null"); } catch { return null; }
+};
+const writeSeat = (id: string, seat: number, token: string) => {
+  try { localStorage.setItem(SEAT_KEY(id), JSON.stringify({ seat, token })); } catch { /* storage blocked */ }
+};
 const ESSAY_URL = "https://whitmanic.substack.com/p/semitic-triangles-the-most-obscure";
 
 type Camera = { x: number; y: number; z: number };
@@ -51,6 +73,13 @@ const App = () => {
   // A script from the other alphabet, waiting for the player to agree to a fresh board.
   const [pendingScript, setPendingScript] = useState<ScriptId | null>(null);
   const [lex, setLex] = useState<Lexicon | null>(null);
+  const [words, setWords] = useState<{ he: WordList | null; ar: WordList | null } | null>(null);
+  const [online, setOnline] = useState<Online | null>(null);
+  const [onlineSetup, setOnlineSetup] = useState(false);
+  const onlineRef = useRef<Online | null>(null);
+  onlineRef.current = online;
+  const gameRef = useRef(game);
+  gameRef.current = game;
   const [cam, setCam] = useState<Camera>({ x: 0.5, y: H / 3, z: 130 });
 
   const board = useMemo(() => boardOf(game), [game]);
@@ -62,14 +91,157 @@ const App = () => {
   const verdict = selTri ? checkRoot(game, board, selTri, root) : null;
   const preview = arrs.length ? arrs[arrIdx % arrs.length] : null;
   const current = game.players[game.turn % game.players.length];
+  const myTurn = !online || online.seat === game.turn % game.players.length;
+  const used = useMemo(() => new Set(game.moves.map((m) => m.root.join(""))), [game.moves]);
+  const stars = useMemo(() => starsOf(game), [game]);
 
   // The root dictionary loads separately so the board appears at once.
   useEffect(() => {
     import("@/data/roots.json").then((m) => setLex(m.default as unknown as Lexicon)).catch(() => {});
   }, []);
 
-  // Load: a shared link wins, then this browser's saved game.
+  // Words for the root explorer: loaded the first time someone opens it.
+  const loadWords = useCallback(() => {
+    if (words) return;
+    setWords({ he: null, ar: null });
+    Promise.all([import("@/data/words-he.json"), import("@/data/words-ar.json")])
+      .then(([h, a]) => setWords({ he: h.default as unknown as WordList, ar: a.default as unknown as WordList }))
+      .catch(() => {});
+  }, [words]);
+
+  // ------------------------------------------------------------- online play
+  /** Take the server's version of an online game, keeping this viewer's choice of script. */
+  const adopt = useCallback((v: ServerView, seat?: { seat: number; token: string } | null) => {
+    const prev = gameRef.current;
+    const g = { ...v.game, script: prev.alphabet === v.game.alphabet ? prev.script : v.game.script };
+    const was = onlineRef.current;
+    // Tell this player what the others just did.
+    if (was && was.id === v.id && v.version > was.version && g.moves.length > prev.moves.length) {
+      const m = g.moves[g.moves.length - 1];
+      if (m.player !== was.seat)
+        toast(`${g.players[m.player]?.name} played ${rootTranslit(m.root, g)}${m.gloss ? ` (${m.gloss})` : ""}.`);
+    }
+    setGame(g);
+    setOnline({
+      id: v.id, version: v.version, seated: v.seated,
+      seat: seat ? seat.seat : was?.id === v.id ? was.seat : null,
+      token: seat ? seat.token : was?.id === v.id ? was.token : null,
+    });
+  }, []);
+
+  const joinRoom = useCallback(async (id: string) => {
+    const { ok, data } = await api(`?id=${id}`);
+    if (!ok) { toast.error(data.error ?? "That online game couldn't be opened."); return false; }
+    adopt(data, readSeat(id));
+    const [x, y] = centreOf(data.game);
+    setCam((c) => ({ ...c, x, y }));
+    return true;
+  }, [adopt]);
+
+  // Keep the board current: a quick check every couple of seconds, slower in the background.
   useEffect(() => {
+    if (!online) return;
+    let stop = false;
+    let timer: number;
+    const tick = async () => {
+      const o = onlineRef.current;
+      if (stop || !o) return;
+      try {
+        const { ok, data } = await api(`?id=${o.id}`);
+        if (ok && data.version > (onlineRef.current?.version ?? 0)) adopt(data);
+      } catch { /* offline for a moment */ }
+      timer = window.setTimeout(tick, document.hidden ? 15000 : 2000);
+    };
+    timer = window.setTimeout(tick, 2000);
+    const wake = () => { if (!document.hidden) { clearTimeout(timer); tick(); } };
+    document.addEventListener("visibilitychange", wake);
+    return () => { stop = true; clearTimeout(timer); document.removeEventListener("visibilitychange", wake); };
+  }, [online?.id, adopt]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /** Send a move to the server, or apply it here when playing on this device. */
+  const act = useCallback(async (action: Action): Promise<boolean> => {
+    const o = onlineRef.current;
+    if (!o) {
+      const g = gameRef.current;
+      const player = action.type === "undo" ? g.moves[g.moves.length - 1]?.player ?? 0 : g.turn % g.players.length;
+      const res = applyAction(g, player, action);
+      if (!res.game) { toast(res.error); return false; }
+      setGame(res.game);
+      return true;
+    }
+    if (o.seat === null || !o.token) { toast("Take a seat to play. You're watching this game."); return false; }
+    let version = o.version;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const { ok, status, data } = await api(`?id=${o.id}&op=act`, { token: o.token, version, action });
+      if (ok) { adopt(data); return true; }
+      if (status === 409 && data.game) {
+        adopt(data);
+        // Someone joined or the version moved on without touching the board: try once more.
+        const sameBoard = data.game.moves.length === gameRef.current.moves.length && data.game.turn === gameRef.current.turn;
+        if (attempt === 0 && sameBoard && applyAction(data.game, o.seat, action).game) { version = data.version; continue; }
+        if (!sameBoard) { toast("The board changed before your move landed. Have another look."); return false; }
+      }
+      toast(data.error ?? "That move didn't go through.");
+      return false;
+    }
+    return false;
+  }, [adopt]);
+
+  const startOnline = async (names: string[]) => {
+    const g = { ...newGame(game.alphabet, names), script: game.script };
+    const { ok, data } = await api("", { game: g });
+    if (!ok || data.seat === undefined || !data.token) { toast.error(data.error ?? "Couldn't start an online game."); return; }
+    writeSeat(data.id, data.seat, data.token);
+    history.replaceState(null, "", `${window.location.pathname}?game=${data.id}`);
+    clearComposer();
+    setInspected(null);
+    setOnlineSetup(false);
+    adopt(data, { seat: data.seat, token: data.token });
+    setCam((c) => ({ ...c, x: 0.5, y: H / 3 }));
+    shareOnline(data.id);
+  };
+
+  const takeSeat = async (seat: number, name: string) => {
+    if (!online) return;
+    const { ok, data } = await api(`?id=${online.id}&op=seat`, { seat, name });
+    if (!ok || !data.token) { toast.error(data.error ?? "Couldn't take that seat."); if (data.game) adopt(data); return; }
+    writeSeat(online.id, seat, data.token);
+    adopt(data, { seat, token: data.token });
+    toast.success(`You're playing as ${data.game.players[seat].name}.`);
+  };
+
+  const leaveOnline = () => {
+    setOnline(null);
+    history.replaceState(null, "", window.location.pathname);
+    let g: Game | null = null;
+    try { g = parseStoredGame(localStorage.getItem(STORAGE_KEY)); } catch { /* storage blocked */ }
+    setGame(g ?? defaultGame());
+    clearComposer();
+    setInspected(null);
+  };
+
+  const onlineUrl = (id: string) => `${window.location.origin}${window.location.pathname}?game=${id}`;
+  const shareOnline = async (id: string) => {
+    const url = onlineUrl(id);
+    setShareUrl(url);
+    try {
+      await navigator.clipboard.writeText(url);
+      toast.success("Link copied. Send it to the other players; each takes a seat when they open it.");
+    } catch {
+      toast("Send the link below to the other players.");
+    }
+  };
+
+  // Load: an online game, then a shared link, then this browser's saved game.
+  useEffect(() => {
+    const room = new URLSearchParams(window.location.search).get("game");
+    if (room) {
+      joinRoom(room).then((ok) => {
+        if (!ok) history.replaceState(null, "", window.location.pathname);
+        setLoaded(true);
+      });
+      return;
+    }
     let g: Game | null = null;
     const m = window.location.hash.match(/^#g=(.+)$/);
     if (m) {
@@ -90,9 +262,9 @@ const App = () => {
   }, []);
 
   useEffect(() => {
-    if (!loaded) return;
+    if (!loaded || online) return;
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(game)); } catch { /* storage blocked */ }
-  }, [game, loaded]);
+  }, [game, loaded, online]);
 
   const clearComposer = () => {
     setSelected(null);
@@ -101,32 +273,31 @@ const App = () => {
     setGloss("");
   };
 
-  const place = useCallback(() => {
+  const place = useCallback(async () => {
     if (!selTri || !verdict?.ok || !preview) return;
     // With no meaning typed, take the dictionary's.
     const known = rootInfo?.senses.find((s) => !lang || s.lang === lang) ?? rootInfo?.senses[0];
     const meaning = gloss.trim() || known?.gloss || "";
     const language = lang || (!gloss.trim() && known ? known.lang : "");
-    setGame((g) => ({
-      ...g,
-      moves: [...g.moves, { tri: tKey(selTri), root, corners: preview, gloss: meaning, ...(language ? { lang: language } : {}), player: g.turn }],
-      turn: (g.turn + 1) % g.players.length,
-    }));
+    const before = starsOf(gameRef.current).length;
+    const placed = await act({ type: "place", tri: tKey(selTri), root, corners: preview, gloss: meaning, ...(language ? { lang: language } : {}) });
+    if (!placed) return;
     clearComposer();
-  }, [selTri, verdict, preview, root, gloss, lang, rootInfo]);
+    const made = starsOf(gameRef.current).length - before;
+    if (made > 0) toast.success(`${made === 1 ? "A full point" : `${made} full points`}! All six triangles around a letter: +${STAR_BONUS * made}.`);
+  }, [selTri, verdict, preview, root, gloss, lang, rootInfo, act]);
 
   const pass = () => {
     clearComposer();
-    setGame((g) => ({ ...g, turn: (g.turn + 1) % g.players.length }));
+    act({ type: "pass" });
   };
 
-  const undo = () => {
+  const undo = async () => {
     if (!game.moves.length) return;
     const last = game.moves[game.moves.length - 1];
     clearComposer();
     setInspected(null);
-    setGame((g) => ({ ...g, moves: g.moves.slice(0, -1), turn: last.player }));
-    toast(`Took back ${rootText(last.root, game)}.`);
+    if (await act({ type: "undo" })) toast(`Took back ${rootText(last.root, game)}.`);
   };
 
   const addLetter = useCallback((l: string) => {
@@ -162,6 +333,10 @@ const App = () => {
       return;
     }
     setInspected(null);
+    if (online && !myTurn) {
+      toast(online.seat === null ? "You're watching. Take a free seat under Game to play." : `Waiting for ${current.name}.`);
+      return;
+    }
     const v = canPlayAt(game, board, tri);
     if (!v.ok) {
       toast(v.reason);
@@ -205,6 +380,8 @@ const App = () => {
     if (a === game.alphabet) {
       setGame((g) => ({ ...g, script: s }));
       setPendingScript(null);
+    } else if (online) {
+      toast("An online game keeps its alphabet. Leave it to start a game in another script.");
     } else if (game.moves.length === 0) {
       startGame(a, game.players.map((p) => p.name), s);
     } else {
@@ -214,6 +391,7 @@ const App = () => {
 
   const startGame = (alphabet: AlphabetId, names: string[], script?: ScriptId) => {
     const g = { ...newGame(alphabet, names), ...(script ? { script } : {}) };
+    if (onlineRef.current) { setOnline(null); history.replaceState(null, "", window.location.pathname); }
     setPendingScript(null);
     setGame(g);
     clearComposer();
@@ -222,7 +400,7 @@ const App = () => {
     setSetupOpen(false);
   };
 
-  const sc = scores(game);
+  const sc = scoreboard(game);
   const fontFamily = SCRIPT_FONT[game.script];
   const letters = ALPHABETS[game.alphabet].letters;
   const needed = new Set((fixed ?? []).filter(Boolean) as string[]);
@@ -240,6 +418,7 @@ const App = () => {
           selected={selected}
           preview={preview}
           inspected={inspected}
+          stars={stars}
           fontFamily={fontFamily}
           onTriClick={onTriClick}
         />
@@ -273,16 +452,16 @@ const App = () => {
           <section>
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-xs tracking-[0.25em] uppercase text-primary">
-                {game.players.length > 1 ? "Turn" : "Solo game"}
+                {online ? (myTurn ? "Your turn" : online.seat === null ? "Watching" : `${current.name}'s turn`) : game.players.length > 1 ? "Turn" : "Solo game"}
               </h2>
               <div className="flex gap-1">
-                {game.players.length > 1 && (
+                {game.players.length > 1 && myTurn && (
                   <button onClick={pass} className="flex items-center gap-1 px-2 py-1 rounded hover:bg-secondary text-muted-foreground hover:text-foreground"
                     title="Can't think of a root? Hand over the pen. No record is kept of the fumble.">
                     <SkipForward className="w-3.5 h-3.5" /> Pass
                   </button>
                 )}
-                <button onClick={undo} disabled={!game.moves.length}
+                <button onClick={undo} disabled={!game.moves.length || (!!online && game.moves[game.moves.length - 1]?.player !== online.seat)}
                   className="flex items-center gap-1 px-2 py-1 rounded hover:bg-secondary text-muted-foreground hover:text-foreground disabled:opacity-40 disabled:pointer-events-none">
                   <Undo2 className="w-3.5 h-3.5" /> Undo
                 </button>
@@ -295,7 +474,15 @@ const App = () => {
                   <li key={i} className={`flex items-center gap-2 px-3 py-2 rounded border ${active ? "border-foreground/30 bg-secondary/60" : "border-transparent"}`}>
                     <span className="w-3 h-3 rounded-full shrink-0" style={{ background: p.color }} />
                     <span className={`flex-1 ${active ? "font-medium" : "text-muted-foreground"}`}>{p.name}</span>
-                    <span className="tabular-nums text-muted-foreground">{sc[i]} {sc[i] === 1 ? "root" : "roots"}</span>
+                    {online && (
+                      <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                        {online.seat === i ? "you" : online.seated.includes(i) ? "" : "open seat"}
+                      </span>
+                    )}
+                    <span className="tabular-nums text-muted-foreground" title={`${sc[i].roots} roots, ${sc[i].stars} full points (+${STAR_BONUS} each)`}>
+                      {sc[i].stars > 0 && <span className="inline-flex items-center gap-0.5 mr-2 text-foreground/80"><StarIcon className="w-3 h-3" />{sc[i].stars}</span>}
+                      {sc[i].points} {sc[i].points === 1 ? "pt" : "pts"}
+                    </span>
                   </li>
                 );
               })}
@@ -323,6 +510,10 @@ const App = () => {
                 rootInfo={rootInfo}
                 lexReady={!!lex}
                 useSense={(s: RootSense) => { setGloss(s.gloss); setLang(s.lang); }}
+                rootIndex={rootIndex}
+                used={used}
+                words={words}
+                loadWords={loadWords}
                 verdict={verdict!}
                 place={place}
                 cancel={clearComposer}
@@ -346,14 +537,19 @@ const App = () => {
                   {rootTranslit(inspectedMove.root, game)}
                   {inspectedMove.gloss && <> · <span className="italic text-foreground/80">{inspectedMove.gloss}</span></>}
                 </p>
+                <RootExplorer game={game} root={inspectedMove.root} rootIndex={rootIndex} words={words} loadWords={loadWords} fontFamily={fontFamily} open />
               </div>
             ) : (
               <p className="text-muted-foreground leading-relaxed">
-                <span className="font-medium text-foreground">{current.name}</span>
+                {online && !myTurn ? (
+                  <>{online.seat === null ? "You're watching this game. Take a free seat below to play." : <>Waiting for <span className="font-medium text-foreground">{current.name}</span> to play. The board updates by itself.</>}</>
+                ) : <>
+                <span className="font-medium text-foreground">{online ? "Your turn" : current.name}</span>
                 {game.moves.length === 0
                   ? ": tap any triangle to lay down the first root."
                   : ": tap a shaded triangle beside the letters to add a root."}
-                <span className="block mt-2 text-xs">Drag to move around, scroll or pinch to zoom.</span>
+                </>}
+                <span className="block mt-2 text-xs">Drag to move around, scroll or pinch to zoom. Tap a played root to explore its words.</span>
               </p>
             )}
           </section>
@@ -369,7 +565,7 @@ const App = () => {
                       className={`w-full flex items-baseline gap-3 px-2 py-1.5 rounded text-left hover:bg-secondary/70 ${inspected === i ? "bg-secondary" : ""}`}>
                       <span className="w-6 text-xs text-muted-foreground tabular-nums">{i + 1}</span>
                       <span className="w-2 h-2 rounded-full shrink-0 self-center" style={{ background: game.players[m.player]?.color }} />
-                      <span dir="rtl" className="text-lg w-16 text-right" style={{ fontFamily }}>{rootText(m.root, game)}</span>
+                      <span dir="rtl" className="text-lg min-w-[4rem] text-right whitespace-nowrap shrink-0" style={{ fontFamily }}>{rootText(m.root, game)}</span>
                       <span className="text-muted-foreground truncate">
                         {rootTranslit(m.root, game)}{m.gloss && <span className="italic"> · {m.gloss}</span>}
                         {m.lang && <span className="ml-1.5 text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-secondary text-muted-foreground not-italic">{m.lang}</span>}
@@ -414,14 +610,25 @@ const App = () => {
                 </div>
               )}
             </div>
-            <div className="flex flex-wrap gap-2">
-              <button onClick={share} className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-border hover:bg-secondary">
-                <Link2 className="w-3.5 h-3.5" /> Copy game link
-              </button>
-              <button onClick={() => setSetupOpen((o) => !o)} className="px-3 py-1.5 rounded-md border border-border hover:bg-secondary">
-                New game
-              </button>
-            </div>
+            {online ? (
+              <OnlinePanel game={game} online={online} onShare={() => shareOnline(online.id)} onSeat={takeSeat} onLeave={leaveOnline} />
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                <button onClick={() => { setOnlineSetup((o) => !o); setSetupOpen(false); }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary text-primary-foreground font-medium">
+                  <Globe className="w-3.5 h-3.5" /> Play online
+                </button>
+                <button onClick={share} className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-border hover:bg-secondary">
+                  <Link2 className="w-3.5 h-3.5" /> Copy game link
+                </button>
+                <button onClick={() => { setSetupOpen((o) => !o); setOnlineSetup(false); }} className="px-3 py-1.5 rounded-md border border-border hover:bg-secondary">
+                  New game
+                </button>
+              </div>
+            )}
+            {onlineSetup && !online && (
+              <OnlineSetup game={game} onStart={startOnline} onCancel={() => setOnlineSetup(false)} />
+            )}
             {shareUrl && (
               <div className="flex gap-1.5">
                 <input id="share-url" readOnly value={shareUrl} onFocus={(e) => e.currentTarget.select()}
@@ -444,7 +651,8 @@ const App = () => {
                 <p>Each triangle holds one three-letter Semitic root, one radical on each corner. Where six triangles meet at a point, they all share that letter.</p>
                 <p>So a new root has to fit the letters already on its corners: one shared letter with every triangle it touches at a point, two with every triangle it shares a side with.</p>
                 <p>Any root from any Semitic language is fair game: Hebrew, Aramaic, Arabic, Akkadian, Ge'ez and the rest, spelled in this game's alphabet. Tag each root with its language if you like. No root may be played twice. Stuck? Pass the pen; no record is kept of the fumble.</p>
-                <p>Playing alone, keep going until you drop. Playing apart, copy the game link after your move and send it.</p>
+                <p>Laying the sixth triangle around a letter completes a full point, worth {STAR_BONUS} extra points to whoever lays it.</p>
+                <p>Playing alone, keep going until you drop. Playing apart, start an online game and send the link: everyone sees each move as it happens.</p>
                 <p className="text-xs">
                   When a root is laid down, the game looks it up in Wiktionary (CC BY-SA 4.0, via kaikki.org), Brown–Driver–Briggs (Hebrew and Aramaic; digital edition by the Open Scriptures Hebrew Bible Project, CC BY 4.0) and Lane's <i>Arabic-English Lexicon</i> (text provided by Perseus Digital Library, with funding from The U.S. Department of Education and The Max Planck Society). A root missing from all three is still fair: they don't cover Akkadian, Ge'ez or the rest.
                 </p>
@@ -470,11 +678,12 @@ type BoardProps = {
   selected: string | null;
   preview: string[] | null;
   inspected: number | null;
+  stars: ReturnType<typeof starsOf>;
   fontFamily: string;
   onTriClick: (t: Tri) => void;
 };
 
-const BoardView = ({ game, board, cam, setCam, selected, preview, inspected, fontFamily, onTriClick }: BoardProps) => {
+const BoardView = ({ game, board, cam, setCam, selected, preview, inspected, stars, fontFamily, onTriClick }: BoardProps) => {
   const ref = useRef<SVGSVGElement>(null);
   const [size, setSize] = useState({ w: 800, h: 600 });
   const [hover, setHover] = useState<string | null>(null);
@@ -638,6 +847,18 @@ const BoardView = ({ game, board, cam, setCam, selected, preview, inspected, fon
           stroke="hsl(var(--primary))" strokeWidth={2.5} vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
       )}
 
+      {/* Full points: a six-pointed star behind each completed letter. */}
+      {stars.map((st) => {
+        const [q, r] = st.vertex.split(",").map(Number);
+        const [x, y] = vPos([q, r]);
+        const pts = Array.from({ length: 12 }, (_, i) => {
+          const a = (Math.PI / 6) * i - Math.PI / 2;
+          const rad = i % 2 ? 0.075 : 0.15;
+          return `${x + rad * Math.cos(a)},${y + rad * Math.sin(a)}`;
+        }).join(" ");
+        return <polygon key={st.vertex} points={pts} fill={game.players[st.player]?.color ?? "#888"} opacity={0.85} />;
+      })}
+
       {/* Points that carry a letter. */}
       {[...board.letters.keys()].map((vk) => {
         const [q, r] = vk.split(",").map(Number);
@@ -684,6 +905,10 @@ type ComposerProps = {
   rootInfo: ReturnType<typeof lookupRoot> | null;
   lexReady: boolean;
   useSense: (s: RootSense) => void;
+  rootIndex: RootIndex | null;
+  used: Set<string>;
+  words: { he: WordList | null; ar: WordList | null } | null;
+  loadWords: () => void;
   verdict: { ok: boolean; reason?: string };
   place: () => void;
   cancel: () => void;
@@ -743,6 +968,8 @@ const Composer = (p: ComposerProps) => {
           </button>
         ))}
       </div>
+
+      {!full && p.rootIndex && <Hints p={p} />}
 
       {full && p.lexReady && p.rootInfo && <RootNotes p={p} />}
 
@@ -865,6 +1092,7 @@ const RootNotes = ({ p }: { p: ComposerProps }) => {
           Not in the Hebrew, Aramaic or Arabic dictionaries. Still fair if it comes from another Semitic language: add its meaning and language below.
         </p>
       )}
+      <RootExplorer game={game} root={p.root} rootIndex={p.rootIndex} words={p.words} loadWords={p.loadWords} fontFamily={fontFamily} />
       {otherOrders.length > 0 && (
         <div className="space-y-1 pt-1 border-t border-border/60">
           <p className="text-muted-foreground">Same letters, other roots · tap to switch</p>
@@ -878,6 +1106,166 @@ const RootNotes = ({ p }: { p: ComposerProps }) => {
           ))}
         </div>
       )}
+    </div>
+  );
+};
+
+// "Stuck?": dictionary roots that would fit the chosen triangle.
+const Hints = ({ p }: { p: ComposerProps }) => {
+  const [open, setOpen] = useState(false);
+  const { game, fontFamily } = p;
+  const hints = useMemo(() => (open && p.rootIndex ? hintsFor(p.rootIndex, p.fixed, p.used) : []), [open, p.rootIndex, p.fixed, p.used]);
+  if (!open)
+    return (
+      <button onClick={() => setOpen(true)} className="flex items-center gap-1.5 text-xs text-primary hover:underline">
+        <Lightbulb className="w-3.5 h-3.5" /> Stuck? Show roots that fit
+      </button>
+    );
+  return (
+    <div className="rounded-md bg-secondary/50 px-3 py-2.5 space-y-1 text-xs">
+      <div className="flex items-center justify-between">
+        <p className="text-muted-foreground">Roots that fit here · tap to use</p>
+        <button onClick={() => setOpen(false)} aria-label="Hide hints" className="text-muted-foreground hover:text-foreground"><X className="w-3.5 h-3.5" /></button>
+      </div>
+      {hints.length === 0 && <p className="text-muted-foreground">The dictionary has nothing unplayed for these letters. Try a root from another language, or pass.</p>}
+      {hints.map((h) => (
+        <button key={h.root.join("")} onClick={() => p.setRoot(h.root)}
+          className="flex w-full items-baseline gap-2 text-left rounded px-1.5 py-1 hover:bg-background/70">
+          <span dir="rtl" className="text-base shrink-0" style={{ fontFamily }}>{h.root.map((l) => glyph(l, game.script)).join(" ")}</span>
+          <span className="text-muted-foreground shrink-0">{rootTranslit(h.root, game)}</span>
+          <span className="truncate text-foreground/80">{h.senses[0].gloss}</span>
+        </button>
+      ))}
+    </div>
+  );
+};
+
+// The family of a root: what it means in each language, and words built on it.
+const RootExplorer = ({ game, root, rootIndex, words, loadWords, fontFamily, open: startOpen = false }: {
+  game: Game; root: string[]; rootIndex: RootIndex | null;
+  words: { he: WordList | null; ar: WordList | null } | null; loadWords: () => void; fontFamily: string; open?: boolean;
+}) => {
+  const [open, setOpen] = useState(startOpen);
+  useEffect(() => { if (open) loadWords(); }, [open, loadWords]);
+  useEffect(() => { setOpen(startOpen); }, [root.join(""), startOpen]); // eslint-disable-line react-hooks/exhaustive-deps
+  if (!open)
+    return (
+      <button onClick={() => setOpen(true)} className="flex items-center gap-1.5 text-xs text-primary hover:underline">
+        <BookOpen className="w-3.5 h-3.5" /> Words from this root
+      </button>
+    );
+  const senses = rootIndex ? lookupRoot(rootIndex, root).senses : [];
+  const loading = !words || (!words.he && !words.ar);
+  const families = words ? wordsFor(words.he, words.ar, game.alphabet, root) : [];
+  return (
+    <div className="mt-3 space-y-3 text-xs">
+      {senses.length > 0 && (
+        <div className="space-y-0.5">
+          {senses.map((s) => (
+            <p key={s.lang}><span className="uppercase tracking-wider text-[10px] text-muted-foreground mr-1.5">{s.lang}</span>{s.gloss}</p>
+          ))}
+        </div>
+      )}
+      {loading ? (
+        <p className="text-muted-foreground">Loading words…</p>
+      ) : families.length === 0 ? (
+        <p className="text-muted-foreground">No words from this root in the Hebrew or Arabic word lists.</p>
+      ) : (
+        families.map((f) => (
+          <div key={f.lang}>
+            <p className="uppercase tracking-wider text-[10px] text-muted-foreground mb-1">{f.lang} words</p>
+            <ul className="space-y-1">
+              {f.words.map(([w, rom, pos, gl]) => (
+                <li key={w + pos} className="flex items-baseline gap-2">
+                  <span dir="rtl" className="text-base shrink-0" style={{ fontFamily: f.lang === "Arabic" ? SCRIPT_FONT.arabic : SCRIPT_FONT.hebrew }}>{w}</span>
+                  <span className="text-muted-foreground shrink-0 italic">{rom}</span>
+                  <span className="text-foreground/80 min-w-0">{gl}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))
+      )}
+      {!loading && <p className="text-[10px] text-muted-foreground">Words and meanings from Wiktionary (CC BY-SA 4.0).</p>}
+      {!startOpen && (
+        <button onClick={() => setOpen(false)} className="text-muted-foreground hover:text-foreground">Hide words</button>
+      )}
+    </div>
+  );
+};
+
+// Starting an online game: who's playing.
+const OnlineSetup = ({ game, onStart, onCancel }: { game: Game; onStart: (names: string[]) => Promise<void>; onCancel: () => void }) => {
+  const [names, setNames] = useState<string[]>(game.players.length >= 2 ? game.players.map((p) => p.name) : ["Player 1", "Player 2"]);
+  const [busy, setBusy] = useState(false);
+  return (
+    <div className="rounded-lg border border-border p-4 space-y-3 bg-card">
+      <p className="text-muted-foreground text-xs leading-relaxed">
+        Starts a fresh {ALPHABETS[game.alphabet].label.replace(/ \(\d+\)$/, "")} board online. You take the first seat; send the link and each friend takes one of the others. Your game on this device stays saved.
+      </p>
+      <div className="space-y-1.5">
+        {names.map((n, i) => (
+          <div key={i} className="flex gap-1.5 items-center">
+            <span className="w-3 h-3 rounded-full shrink-0" style={{ background: ["#b5532f", "#3d5a80", "#6b7d2a", "#8a4f7d"][i] }} />
+            <input id={`online-name-${i}`} value={n} onChange={(e) => setNames(names.map((m, j) => (j === i ? e.target.value : m)))}
+              className="flex-1 px-2 py-1.5 rounded border border-input bg-background" aria-label={i === 0 ? "Your name" : `Player ${i + 1} name`} />
+            {i === 0 && <span className="text-[10px] uppercase tracking-wider text-muted-foreground">you</span>}
+            {names.length > 2 && i > 0 && (
+              <button onClick={() => setNames(names.filter((_, j) => j !== i))} aria-label="Remove player"
+                className="px-2 py-1.5 rounded border border-border hover:bg-secondary"><X className="w-3.5 h-3.5" /></button>
+            )}
+          </div>
+        ))}
+        {names.length < 4 && (
+          <button onClick={() => setNames([...names, `Player ${names.length + 1}`])} className="text-xs text-primary hover:underline">+ Add player</button>
+        )}
+      </div>
+      <div className="flex gap-2">
+        <button disabled={busy} onClick={async () => { setBusy(true); await onStart(names.map((n, i) => n.trim() || `Player ${i + 1}`)); setBusy(false); }}
+          className="flex-1 py-2 rounded-md bg-primary text-primary-foreground font-medium disabled:opacity-50">
+          {busy ? "Starting…" : "Start online game"}
+        </button>
+        <button onClick={onCancel} className="px-3 py-2 rounded-md border border-border hover:bg-secondary">Cancel</button>
+      </div>
+    </div>
+  );
+};
+
+// An online game in progress: the link, the seats, and the way out.
+const OnlinePanel = ({ game, online, onShare, onSeat, onLeave }: {
+  game: Game; online: Online; onShare: () => void; onSeat: (seat: number, name: string) => void; onLeave: () => void;
+}) => {
+  const free = game.players.map((_, i) => i).filter((i) => !online.seated.includes(i));
+  const [name, setName] = useState("");
+  return (
+    <div className="rounded-lg border border-border p-4 space-y-3 bg-card">
+      <p className="flex items-center gap-1.5 font-medium"><Globe className="w-3.5 h-3.5 text-primary" /> Online game</p>
+      {online.seat === null && free.length > 0 && (
+        <div className="space-y-2">
+          <p className="text-xs text-muted-foreground">Take a free seat to play:</p>
+          <input id="seat-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Your name"
+            className="w-full px-2 py-1.5 rounded border border-input bg-background" aria-label="Your name" />
+          <div className="flex flex-wrap gap-1.5">
+            {free.map((i) => (
+              <button key={i} onClick={() => onSeat(i, name)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-border hover:bg-secondary">
+                <span className="w-2.5 h-2.5 rounded-full" style={{ background: game.players[i].color }} /> Play as {game.players[i].name}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      {online.seat === null && free.length === 0 && <p className="text-xs text-muted-foreground">Every seat is taken, so you're watching.</p>}
+      {online.seat !== null && free.length > 0 && (
+        <p className="text-xs text-muted-foreground">Waiting for {free.map((i) => game.players[i].name).join(" and ")} to open the link and take a seat.</p>
+      )}
+      <div className="flex flex-wrap gap-2">
+        <button onClick={onShare} className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-border hover:bg-secondary">
+          <Link2 className="w-3.5 h-3.5" /> Copy invite link
+        </button>
+        <button onClick={onLeave} className="px-3 py-1.5 rounded-md border border-border hover:bg-secondary">Back to my game</button>
+      </div>
+      <p className="text-[11px] text-muted-foreground">The link brings anyone back to this board. Your seat is remembered on this device.</p>
     </div>
   );
 };
