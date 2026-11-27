@@ -422,6 +422,19 @@ const App = () => {
           fontFamily={fontFamily}
           onTriClick={onTriClick}
         />
+        {/* An epigraph for a fresh board; it leaves with the first root. Taps pass through. */}
+        {loaded && game.moves.length === 0 && !selected && (
+          <figure className="absolute inset-x-0 bottom-[14%] px-6 text-center pointer-events-none select-none epigraph">
+            <div className="inline-block rounded-xl px-6 py-4 bg-background/80 backdrop-blur-[2px]">
+              <blockquote className="font-display italic text-lg lg:text-xl leading-snug text-foreground/60">
+                in the beginning was<br />the three-letter root<br />which unfolded like protein<br />ripe for diverse expression
+              </blockquote>
+              <figcaption className="mt-2 text-[11px] tracking-wide text-muted-foreground font-body">
+                — Josh Lipson, “Aqui fazem-se milagres, no metal”
+              </figcaption>
+            </div>
+          </figure>
+        )}
         <div style={{ top: "max(0.75rem, env(safe-area-inset-top))" }} className="absolute left-3 right-3 flex items-start justify-between pointer-events-none">
           <div className="pointer-events-auto bg-background/85 backdrop-blur rounded-md px-2.5 py-1.5 lg:px-3 lg:py-2 border border-border/60">
             <h1 className="font-display text-xl lg:text-2xl leading-tight">Semitic Triangles</h1>
@@ -656,9 +669,38 @@ const App = () => {
                 <p className="text-xs">
                   When a root is laid down, the game looks it up in Wiktionary (CC BY-SA 4.0, via kaikki.org), Brown–Driver–Briggs (Hebrew and Aramaic; digital edition by the Open Scriptures Hebrew Bible Project, CC BY 4.0) and Lane's <i>Arabic-English Lexicon</i> (text provided by Perseus Digital Library, with funding from The U.S. Department of Education and The Max Planck Society). Wiktionary also supplies a few dozen Ge'ez roots; on a Ge'ez board, other roots are looked up through their Hebrew and Arabic counterparts. A root missing from all of them is still fair: none covers Akkadian, Ugaritic or the rest.
                 </p>
-                <a href={ESSAY_URL} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-primary hover:underline">
-                  The essay behind the game <ExternalLink className="w-3 h-3" />
-                </a>
+              </div>
+            </details>
+          </section>
+
+          {/* About: the poem and the passage behind the game. */}
+          <section>
+            <details className="group">
+              <summary className="cursor-pointer text-xs tracking-[0.25em] uppercase text-primary list-none flex items-center gap-2">
+                <span className="transition-transform group-open:rotate-90">›</span> About the game
+              </summary>
+              <div className="mt-4 space-y-6 text-muted-foreground leading-relaxed">
+                <figure>
+                  <p className="font-display text-lg text-foreground mb-2">Aqui fazem-se milagres, no metal</p>
+                  <div className="font-display text-base text-foreground/85 leading-snug space-y-3">
+                    <p>In this trailer by the River Mondego,<br />miracles in metal<br />are blueprinted and set<br />in kludgy type—</p>
+                    <p>in the beginning was<br />the three-letter root<br />which unfolded like protein<br />ripe for diverse expression—</p>
+                    <p>a formless aleph<br />innocent of glottal dreams<br />trailing black copper slag<br />into the Dead Sea</p>
+                  </div>
+                  <figcaption className="mt-2 text-xs">— Josh Lipson, Coimbra, August 2017</figcaption>
+                </figure>
+                <figure className="border-l-2 border-primary/40 pl-4">
+                  <blockquote className="font-display italic text-base text-foreground/85 leading-snug">
+                    Namely, instead of the morphemes being placed linearly, one after the other before or after the word stem, as prefixes and suffixes, as in English, the morphemic structure of Semitic words is characterized by at least two morphemes interwoven (or interdigitated) within each other in a discontinuous (or non-concatenative) manner. One morpheme, the root, is inserted into the other (call it template, pattern, or scheme) in certain slots of the word stem structure. As two morphemes, the root and the template are incomplete in every respect, morphologically, phonologically, and semantically, until they merge to form a word or a word stem. Indeed roots and templates are both bound morphemes because only when a certain root and a certain template merge a definite word is completely specified phonologically, morphologically, and semantically.
+                  </blockquote>
+                  <figcaption className="mt-2 text-xs">— Joseph Shimron, “Semitic Languages: Are They Really Root-Based?”</figcaption>
+                </figure>
+                <p>
+                  The game began on Thanksgiving 2015, in a notebook, on a walk through Central Jersey.{" "}
+                  <a href={ESSAY_URL} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-primary hover:underline">
+                    Read the essay behind it <ExternalLink className="w-3 h-3" />
+                  </a>
+                </p>
               </div>
             </details>
           </section>
