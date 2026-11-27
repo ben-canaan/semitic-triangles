@@ -29,6 +29,7 @@ import argparse, glob, html, json, re, unicodedata
 ap = argparse.ArgumentParser()
 ap.add_argument("--kaikki-hebrew")
 ap.add_argument("--kaikki-arabic")
+ap.add_argument("--kaikki-geez", help="kaikki.org Ge'ez extract (https://kaikki.org/dictionary/Ge%27ez/)")
 ap.add_argument("--bdb")
 ap.add_argument("--lane")
 ap.add_argument("--out", required=True)
@@ -46,6 +47,27 @@ def heb_root(s):
     """'שׁ־ב־ע' or 'שָׁבַע' -> 'שבע' (only the 22 base letters)."""
     s = unicodedata.normalize("NFD", s)
     return "".join(FINALS.get(c, c) for c in s if FINALS.get(c, c) in HEB)
+
+
+GEEZ_ORDER = "ሀለሐመሠረሰቀበተኀነአከወዐዘየደገጠጰጸፀፈፐ"
+GEEZ_EXTRA = {"ሸ": "ሰ", "ቸ": "ተ", "ኘ": "ነ", "ዠ": "ዘ", "ጀ": "ደ", "ጨ": "ጠ", "ኸ": "ከ", "ቨ": "በ", "ዸ": "ደ", "ጘ": "ገ"}
+GEEZ_LABIAL = [(0x1248, 0x125F, "ቀ"), (0x1288, 0x128F, "ኀ"), (0x12B0, 0x12BF, "ከ"), (0x1310, 0x131F, "ገ")]
+
+
+def geez_root(s):
+    """Any Ethiopic spelling -> its consonants in first-order form (ክ-ት-ብ -> ከተበ)."""
+    out = ""
+    for ch in s:
+        cp = ord(ch)
+        if not 0x1200 <= cp <= 0x137F:
+            continue
+        base = next((b for lo, hi, b in GEEZ_LABIAL if lo <= cp <= hi), None)
+        if base is None:
+            first = chr(cp - (cp - 0x1200) % 8)
+            base = GEEZ_EXTRA.get(first, first)
+        if base in GEEZ_ORDER:
+            out += base
+    return out
 
 
 def ar_root(s):
@@ -115,7 +137,7 @@ POS_RANK = {"verb": 0, "noun": 1, "adj": 2}
 def candidate_rank(entry, lang, root):
     """Lower is better: verbs first, the bare root itself (כתב, كتب) first among verbs, then the simplest stem."""
     pos = POS_RANK.get(entry.get("pos"), 3)
-    bare = 0 if (heb_root if lang == "he" else ar_root)(entry.get("word", "")) == root else 1
+    bare = 0 if TO_ROOT[lang](entry.get("word", "")) == root else 1
     return (pos, bare) + _stem_rank(entry, lang, pos)
 
 
@@ -128,10 +150,14 @@ def _stem_rank(entry, lang, pos):
     return (0 if re.match(r"^I($|[/.])", a) else 1,)
 
 
+PREFIX = {"he": "Hebrew terms belonging to the root ", "ar": "Arabic terms belonging to the root ",
+          "gez": "Ge'ez terms belonging to the root "}
+TO_ROOT = {"he": heb_root, "ar": ar_root, "gez": geez_root}
+
+
 def wiktionary(path, lang):
     """root -> gloss from one kaikki.org language extract."""
-    prefix = "Hebrew terms belonging to the root " if lang == "he" else "Arabic terms belonging to the root "
-    to_root = heb_root if lang == "he" else ar_root
+    prefix, to_root = PREFIX[lang], TO_ROOT[lang]
     root_pages, best = {}, {}
     with open(path, encoding="utf-8") as f:
         for line in f:
@@ -336,6 +362,10 @@ if args.kaikki_arabic:
     w = wiktionary(args.kaikki_arabic, "ar")
     counts["ar (Wiktionary)"] = len(w)
     ar.update(w)
+gez = {}
+if args.kaikki_geez:
+    gez = wiktionary(args.kaikki_geez, "gez")
+    counts["gez (Wiktionary)"] = len(gez)
 if args.bdb:
     bh, ba = bdb(args.bdb)
     counts["he (BDB, added)"] = sum(1 for r in bh if r not in he)
@@ -350,7 +380,7 @@ if args.lane:
 
 data = {
     "_source": [
-        "Hebrew and Arabic: Wiktionary (https://en.wiktionary.org), via kaikki.org, CC BY-SA 4.0.",
+        "Hebrew, Arabic and Ge'ez: Wiktionary (https://en.wiktionary.org), via kaikki.org, CC BY-SA 4.0.",
         "Hebrew and Aramaic: Brown-Driver-Briggs, digital edition by the Open Scriptures Hebrew Bible Project, CC BY 4.0 (https://github.com/openscriptures/HebrewLexicon).",
         "Arabic: E. W. Lane, An Arabic-English Lexicon. Text provided by Perseus Digital Library, with funding from The U.S. Department of Education and The Max Planck Society. This text may be freely distributed, subject to the following restrictions: You credit Perseus, as follows, whenever you use the document: Text provided by Perseus Digital Library, with funding from The U.S. Department of Education and The Max Planck Society. You leave this availability statement intact. You offer Perseus any modifications you make.",
         "Glosses are shortened extracts; roots are given as three consonants.",
@@ -358,6 +388,7 @@ data = {
     "he": dict(sorted(he.items())),
     "arc": dict(sorted(arc.items())),
     "ar": dict(sorted(ar.items())),
+    "gez": dict(sorted(gez.items())),
 }
 if args.words_dir:
     for lang, path in (("he", args.kaikki_hebrew), ("ar", args.kaikki_arabic)):

@@ -54,8 +54,8 @@ export const triAt = (x: number, y: number): Tri => {
 
 // --------------------------------------------------------------- alphabets
 
-export type AlphabetId = "canaanite" | "syriac" | "arabic";
-export type ScriptId = "hebrew" | "paleo" | "syriac" | "arabic";
+export type AlphabetId = "canaanite" | "syriac" | "arabic" | "geez";
+export type ScriptId = "hebrew" | "paleo" | "syriac" | "arabic" | "geez";
 
 type Letter = { id: string; translit: string; keys?: string[] };
 
@@ -106,10 +106,73 @@ const ARABIC: Letter[] = [
   ["ك", "k"], ["ل", "l"], ["م", "m"], ["ن", "n"], ["ه", "h"], ["و", "w"], ["ي", "y"],
 ].map(([id, translit]) => ({ id, translit }));
 
+// Ge'ez: the 26 consonants in their traditional order (hoy, läwe, ḥawt...),
+// stored by their first-order forms and drawn in the sixth order, the bare
+// consonant (ክ ት ብ), as roots are usually written. `he` and `ar` are each
+// letter's usual counterparts, for typing across keyboards and for looking
+// roots up in the Hebrew and Arabic dictionaries.
+const GEEZ_TABLE: [string, string, string[], string[], string[]][] = [
+  // id, translit, keys, Hebrew, Arabic
+  ["ሀ", "h", ["h"], ["ה"], ["ه"]],
+  ["ለ", "l", ["l"], ["ל"], ["ل"]],
+  ["ሐ", "ḥ", ["x", "H"], ["ח"], ["ح"]],
+  ["መ", "m", ["m"], ["מ"], ["م"]],
+  ["ሠ", "ś", ["c"], ["ש"], ["ش"]],
+  ["ረ", "r", ["r"], ["ר"], ["ر"]],
+  ["ሰ", "s", ["s"], ["ש", "ס"], ["س", "ش"]],
+  ["ቀ", "q", ["q"], ["ק"], ["ق"]],
+  ["በ", "b", ["b"], ["ב"], ["ب"]],
+  ["ተ", "t", ["t"], ["ת"], ["ت", "ث"]],
+  ["ኀ", "ḫ", ["X"], ["ח"], ["خ"]],
+  ["ነ", "n", ["n"], ["נ"], ["ن"]],
+  ["አ", "ʾ", ["a", "'"], ["א"], ["ء"]],
+  ["ከ", "k", ["k"], ["כ"], ["ك"]],
+  ["ወ", "w", ["w", "v"], ["ו"], ["و"]],
+  ["ዐ", "ʿ", ["e", "`"], ["ע"], ["ع", "غ"]],
+  ["ዘ", "z", ["z"], ["ז"], ["ز", "ذ"]],
+  ["የ", "y", ["y", "i", "j"], ["י"], ["ي"]],
+  ["ደ", "d", ["d"], ["ד"], ["د"]],
+  ["ገ", "g", ["g"], ["ג"], ["ج"]],
+  ["ጠ", "ṭ", ["T"], ["ט"], ["ط"]],
+  ["ጰ", "p̣", ["P"], ["פ"], ["ب"]],
+  ["ጸ", "ṣ", ["S"], ["צ"], ["ص", "ظ"]],
+  ["ፀ", "ḍ", ["D"], ["צ"], ["ض"]],
+  ["ፈ", "f", ["f"], ["פ"], ["ف"]],
+  ["ፐ", "p", ["p"], ["פ"], ["ف"]],
+];
+const GEEZ: Letter[] = GEEZ_TABLE.map(([id, translit, keys]) => ({ id, translit, keys }));
+export const GEEZ_TO_HE: Record<string, string[]> = Object.fromEntries(GEEZ_TABLE.map(([id, , , he]) => [id, he]));
+export const GEEZ_TO_AR: Record<string, string[]> = Object.fromEntries(GEEZ_TABLE.map(([id, , , , ar]) => [id, ar]));
+// Letters only Amharic and Tigrinya use, read as their Ge'ez sources.
+const GEEZ_EXTRA: Record<string, string> = { "ሸ": "ሰ", "ቸ": "ተ", "ኘ": "ነ", "ዠ": "ዘ", "ጀ": "ደ", "ጨ": "ጠ", "ኸ": "ከ", "ቨ": "በ", "ዸ": "ደ", "ጘ": "ገ" };
+// Labialized rows (ቈ, ኈ, ኰ, ጐ) belong to their plain consonants.
+const GEEZ_LABIAL: [number, number, string][] = [[0x1248, 0x125f, "ቀ"], [0x1288, 0x128f, "ኀ"], [0x12b0, 0x12bf, "ከ"], [0x1310, 0x131f, "ገ"]];
+
+/** Any Ethiopic syllable (ክ, ኩ, ኳ...) as its consonant's first-order form. */
+export const geezBase = (ch: string): string | null => {
+  const cp = ch.codePointAt(0) ?? 0;
+  if (cp < 0x1200 || cp > 0x137f) return null;
+  for (const [a, b, base] of GEEZ_LABIAL) if (cp >= a && cp <= b) return base;
+  const first = String.fromCodePoint(cp - ((cp - 0x1200) % 8));
+  const id = GEEZ_EXTRA[first] ?? first;
+  return GEEZ.some((l) => l.id === id) ? id : null;
+};
+
 export const ALPHABETS: Record<AlphabetId, { label: string; letters: Letter[]; scripts: ScriptId[] }> = {
   canaanite: { label: "Paleo-Hebrew & Hebrew (22)", letters: CANAANITE, scripts: ["paleo", "hebrew"] },
   syriac: { label: "Syriac (22)", letters: CANAANITE, scripts: ["syriac"] },
   arabic: { label: "Arabic (28)", letters: ARABIC, scripts: ["arabic"] },
+  geez: { label: "Ge'ez (26)", letters: GEEZ, scripts: ["geez"] },
+};
+
+/** Ethiopic is written left to right; the others right to left. */
+export const textDir = (script: ScriptId): "ltr" | "rtl" => (script === "geez" ? "ltr" : "rtl");
+
+/** Latin keys players can type, shown under the letter keys. */
+export const LATIN_HINT: Partial<Record<AlphabetId, string>> = {
+  canaanite: "x = ḥ, T = ṭ, c = ṣ, S = š, e = ʿ, a = ʾ",
+  syriac: "x = ḥ, T = ṭ, c = ṣ, S = š, e = ʿ, a = ʾ",
+  geez: "x = ḥ, X = ḫ, c = ś, T = ṭ, S = ṣ, D = ḍ, P = p̣, e = ʿ, a = ʾ",
 };
 
 export const SCRIPT_LABEL: Record<ScriptId, string> = {
@@ -117,6 +180,7 @@ export const SCRIPT_LABEL: Record<ScriptId, string> = {
   hebrew: "Hebrew",
   syriac: "Syriac",
   arabic: "Arabic",
+  geez: "Ge'ez",
 };
 
 export const SCRIPT_FONT: Record<ScriptId, string> = {
@@ -124,10 +188,13 @@ export const SCRIPT_FONT: Record<ScriptId, string> = {
   hebrew: "'Noto Serif Hebrew', 'Times New Roman', serif",
   syriac: "'Noto Sans Syriac', 'Estrangelo Edessa', sans-serif",
   arabic: "'Noto Naskh Arabic', 'Noto Sans Arabic', serif",
+  geez: "'Noto Serif Ethiopic', 'Noto Sans Ethiopic', 'Nyala', serif",
 };
 
 /** How a stored letter is drawn in a script. */
 export const glyph = (id: string, script: ScriptId) => {
+  // Ge'ez: the sixth order (bare consonant) sits five places after the first.
+  if (script === "geez") return String.fromCodePoint((id.codePointAt(0) ?? 0) + 5);
   const glyphs = CANAANITE_GLYPHS[script];
   if (!glyphs) return id;
   const i = CANAANITE.findIndex((l) => l.id === id);
@@ -170,6 +237,18 @@ const canaaniteFromGlyph = (key: string): string | null => {
 /** Map a typed key (any Semitic script, or Latin transliteration) to a letter id. */
 export const letterFromKey = (key: string, alphabet: AlphabetId): string | null => {
   const letters = ALPHABETS[alphabet].letters;
+  if (alphabet === "geez") {
+    const g = geezBase(key);
+    if (g) return g;
+    const exact = letters.find((l) => l.keys?.includes(key)) ?? letters.find((l) => l.keys?.includes(key.toLowerCase()));
+    if (exact) return exact.id;
+    // Hebrew, Syriac or Arabic keyboards: the first Ge'ez letter that answers to the typed one.
+    const he = canaaniteFromGlyph(key);
+    const ar = ARABIC_VARIANTS[key] ?? key;
+    return GEEZ_TABLE.find(([, , , h, a]) => (he && h.includes(he)) || a.includes(ar))?.[0] ?? null;
+  }
+  const fromGeez = geezBase(key);
+  if (fromGeez) return alphabet === "arabic" ? GEEZ_TO_AR[fromGeez][0] : GEEZ_TO_HE[fromGeez][0];
   if (alphabet !== "arabic") {
     const native = canaaniteFromGlyph(key);
     if (native) return native;
@@ -414,7 +493,7 @@ export const applyAction = (game: Game, player: number, action: Action): { game?
 const isGame = (g: unknown): g is Game => {
   const x = g as Game;
   return (
-    !!x && x.version === 1 && (x.alphabet === "canaanite" || x.alphabet === "syriac" || x.alphabet === "arabic") &&
+    !!x && x.version === 1 && ["canaanite", "syriac", "arabic", "geez"].includes(x.alphabet) &&
     Array.isArray(x.players) && x.players.length > 0 && Array.isArray(x.moves) &&
     x.moves.every((m) => typeof m.tri === "string" && Array.isArray(m.root) && Array.isArray(m.corners)) &&
     typeof x.turn === "number"
@@ -465,40 +544,81 @@ export const parseStoredGame = (s: string | null): Game | null => {
  * Arabic-English Lexicon, keyed by their three letters: square Hebrew for
  * "he" and "arc", Arabic for "ar". Built by scripts/build_lexicon.py.
  */
-export type Lexicon = { he: Record<string, string>; arc: Record<string, string>; ar: Record<string, string> };
-export type RootSense = { lang: "Hebrew" | "Aramaic" | "Arabic"; gloss: string };
+export type Lexicon = { he: Record<string, string>; arc: Record<string, string>; ar: Record<string, string>; gez?: Record<string, string> };
+export type RootSense = { lang: "Hebrew" | "Aramaic" | "Arabic" | "Ge'ez"; gloss: string };
 export type RootIndex = Map<string, RootSense[]>;
 
-const add = (idx: RootIndex, key: string, sense: RootSense) => {
+// How far a sense's spelling strays from each letter's main counterpart; a
+// closer match replaces a looser one (Ge'ez ሰበረ: Hebrew שבר before סבר).
+const COST = new WeakMap<RootSense, number>();
+
+const add = (idx: RootIndex, key: string, sense: RootSense, cost = 0) => {
+  COST.set(sense, cost);
   const list = idx.get(key);
-  if (!list) idx.set(key, [sense]);
-  else if (list.length < 4 && !list.some((x) => x.lang === sense.lang)) list.push(sense);
+  if (!list) return void idx.set(key, [sense]);
+  const i = list.findIndex((x) => x.lang === sense.lang);
+  if (i < 0) { if (list.length < 4) list.push(sense); }
+  else if (cost < (COST.get(list[i]) ?? 0)) list[i] = sense;
 };
+
+/** Every spelling of a root under a letter table that may give several letters for one. */
+/** Each letter's possible spellings, with how unusual each is (0 = the usual one). */
+type LetterTable = (c: string) => string[] | [string, number][] | undefined;
+
+const respellCosted = (key: string, table: LetterTable): [string, number][] => {
+  let out: [string, number][] = [["", 0]];
+  for (const c of key) {
+    const raw = table(c);
+    if (!raw?.length) return [];
+    const opts = (raw as (string | [string, number])[]).map((x, i): [string, number] => (typeof x === "string" ? [x, i] : x));
+    out = out.flatMap(([o, cost]) => opts.map(([x, k]): [string, number] => [o + x, cost + k]));
+  }
+  return out;
+};
+const respell = (key: string, table: LetterTable) =>
+  respellCosted(key, table).sort((a, b) => a[1] - b[1]).map(([k]) => k);
+
+// Hebrew/Arabic letter -> Ge'ez letters, costed by how usual that pairing is
+// from the Ge'ez side (ሰ is usually ש, occasionally ס).
+const invert = (m: Record<string, string[]>) => {
+  const inv: Record<string, [string, number][]> = {};
+  for (const [g, list] of Object.entries(m)) list.forEach((x, i) => (inv[x] ??= []).push([g, i]));
+  return inv;
+};
+const HE_TO_GEEZ = invert(GEEZ_TO_HE);
+const AR_TO_GEEZ = invert(GEEZ_TO_AR);
 
 /** Every dictionary root, spelled in the given alphabet's letters. */
 export const buildRootIndex = (lex: Lexicon, alphabet: AlphabetId): RootIndex => {
   const idx: RootIndex = new Map();
+  const gez = lex.gez ?? {};
+  // How each dictionary's letters are spelled in this game's alphabet.
+  let fromHe: LetterTable;
+  let fromAr: LetterTable;
+  let fromGeez: LetterTable;
   if (alphabet === "arabic") {
-    for (const [k, gloss] of Object.entries(lex.ar)) add(idx, k, { lang: "Arabic", gloss });
     // Hebrew ש answers to both Arabic ش and س (šālôm, salām).
-    const variants = (k: string): string[] => {
-      let out = [""];
-      for (const c of k) {
-        const opts = c === "ש" ? ["ش", "س"] : [CANAANITE_TO_ARABIC[c]];
-        out = out.flatMap((o) => opts.map((x) => o + x));
-      }
-      return out;
-    };
-    for (const [k, gloss] of Object.entries(lex.he)) for (const v of variants(k)) add(idx, v, { lang: "Hebrew", gloss });
-    for (const [k, gloss] of Object.entries(lex.arc)) for (const v of variants(k)) add(idx, v, { lang: "Aramaic", gloss });
+    fromHe = (c) => (c === "ש" ? ["ش", "س"] : [CANAANITE_TO_ARABIC[c]]);
+    fromAr = (c) => [c];
+    fromGeez = (c) => GEEZ_TO_AR[c];
+  } else if (alphabet === "geez") {
+    fromHe = (c) => HE_TO_GEEZ[c];
+    fromAr = (c) => AR_TO_GEEZ[c];
+    fromGeez = (c) => [c];
   } else {
-    for (const [k, gloss] of Object.entries(lex.he)) add(idx, k, { lang: "Hebrew", gloss });
-    for (const [k, gloss] of Object.entries(lex.arc)) add(idx, k, { lang: "Aramaic", gloss });
-    for (const [k, gloss] of Object.entries(lex.ar)) {
-      const c = [...k].map((x) => ARABIC_TO_CANAANITE[x]).join("");
-      if (c.length === 3) add(idx, c, { lang: "Arabic", gloss });
-    }
+    fromHe = (c) => [c];
+    fromAr = (c) => [ARABIC_TO_CANAANITE[c]];
+    fromGeez = (c) => GEEZ_TO_HE[c];
   }
+  // The game's own language first, so its meaning leads.
+  const sources: [Record<string, string>, RootSense["lang"], typeof fromHe][] = [
+    [lex.he, "Hebrew", fromHe], [lex.arc, "Aramaic", fromHe], [lex.ar, "Arabic", fromAr], [gez, "Ge'ez", fromGeez],
+  ];
+  const first = alphabet === "arabic" ? "Arabic" : alphabet === "geez" ? "Ge'ez" : "Hebrew";
+  sources.sort((a, b) => Number(b[1] === first) - Number(a[1] === first));
+  for (const [dict, lang, table] of sources)
+    for (const [k, gloss] of Object.entries(dict))
+      for (const [v, cost] of respellCosted(k, table)) if (v.length === 3) add(idx, v, { lang, gloss }, cost);
   return idx;
 };
 
@@ -542,26 +662,29 @@ export type RootFamily = { lang: "Hebrew" | "Arabic"; words: Word[] };
 export const wordsFor = (he: WordList | null, ar: WordList | null, alphabet: AlphabetId, root: string[]): RootFamily[] => {
   const out: RootFamily[] = [];
   const key = root.join("");
+  // The root's Hebrew and Arabic spellings, in order of likelihood.
+  let heKeys: string[];
+  let arKeys: string[];
   if (alphabet === "arabic") {
-    const a = ar?.words[key];
-    if (a) out.push({ lang: "Arabic", words: a });
-    // Arabic letter -> Hebrew letter, reversing the table used for typing.
     const toHe = Object.fromEntries(Object.entries(CANAANITE_TO_ARABIC).map(([h, x]) => [x, h]));
     toHe["س"] = "ש";
-    const hk = root.map((l) => toHe[l] ?? ARABIC_TO_CANAANITE[l]).join("");
-    const h = he?.words[hk];
+    heKeys = [root.map((l) => toHe[l] ?? ARABIC_TO_CANAANITE[l]).join("")];
+    arKeys = [key];
+  } else if (alphabet === "geez") {
+    heKeys = respell(key, (c) => GEEZ_TO_HE[c]);
+    arKeys = respell(key, (c) => GEEZ_TO_AR[c]);
+  } else {
+    heKeys = [key];
+    arKeys = ar ? Object.keys(ar.words).filter((k) => [...k].map((l) => ARABIC_TO_CANAANITE[l]).join("") === key) : [];
+  }
+  const h = heKeys.map((k) => he?.words[k]).find(Boolean);
+  const a = arKeys.map((k) => ar?.words[k]).find(Boolean);
+  if (alphabet === "arabic") {
+    if (a) out.push({ lang: "Arabic", words: a });
     if (h) out.push({ lang: "Hebrew", words: h });
   } else {
-    const h = he?.words[key];
     if (h) out.push({ lang: "Hebrew", words: h });
-    if (ar) {
-      for (const [k, words] of Object.entries(ar.words)) {
-        if ([...k].map((l) => ARABIC_TO_CANAANITE[l]).join("") === key) {
-          out.push({ lang: "Arabic", words });
-          break;
-        }
-      }
-    }
+    if (a) out.push({ lang: "Arabic", words: a });
   }
   return out;
 };

@@ -5,7 +5,7 @@ import {
 } from "lucide-react";
 import {
   ALPHABETS, AlphabetId, Action, Game, H, LANGUAGES, Lexicon, RootIndex, RootSense, STAR_BONUS, WordList, applyAction, buildRootIndex,
-  hintsFor, lookupRoot, scoreboard, starsOf, wordsFor, SCRIPT_FONT, SCRIPT_LABEL, ScriptId, Tri,
+  hintsFor, lookupRoot, scoreboard, starsOf, textDir, wordsFor, LATIN_HINT, SCRIPT_FONT, SCRIPT_LABEL, ScriptId, Tri,
   arrangements, boardOf, canPlayAt, checkRoot, decodeGame, encodeGame, fixedCorners, glyph,
   letterFromKey, newGame, parseStoredGame, parseTri, tKey, translit, triAt, triCentroid,
   triVerts, vPos,
@@ -532,7 +532,7 @@ const App = () => {
                     <X className="w-4 h-4" />
                   </button>
                 </div>
-                <p dir="rtl" className="text-3xl text-right" style={{ fontFamily }}>{rootText(inspectedMove.root, game)}</p>
+                <p dir={textDir(game.script)} className={`text-3xl ${textDir(game.script) === "rtl" ? "text-right" : "text-left"}`} style={{ fontFamily }}>{rootText(inspectedMove.root, game)}</p>
                 <p className="text-muted-foreground mt-1">
                   {rootTranslit(inspectedMove.root, game)}
                   {inspectedMove.gloss && <> · <span className="italic text-foreground/80">{inspectedMove.gloss}</span></>}
@@ -565,7 +565,7 @@ const App = () => {
                       className={`w-full flex items-baseline gap-3 px-2 py-1.5 rounded text-left hover:bg-secondary/70 ${inspected === i ? "bg-secondary" : ""}`}>
                       <span className="w-6 text-xs text-muted-foreground tabular-nums">{i + 1}</span>
                       <span className="w-2 h-2 rounded-full shrink-0 self-center" style={{ background: game.players[m.player]?.color }} />
-                      <span dir="rtl" className="text-lg min-w-[4rem] text-right whitespace-nowrap shrink-0" style={{ fontFamily }}>{rootText(m.root, game)}</span>
+                      <span dir={textDir(game.script)} className="text-lg min-w-[4rem] text-right whitespace-nowrap shrink-0" style={{ fontFamily }}>{rootText(m.root, game)}</span>
                       <span className="text-muted-foreground truncate">
                         {rootTranslit(m.root, game)}{m.gloss && <span className="italic"> · {m.gloss}</span>}
                         {m.lang && <span className="ml-1.5 text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-secondary text-muted-foreground not-italic">{m.lang}</span>}
@@ -595,7 +595,7 @@ const App = () => {
                 ))}
               </div>
               <p className="text-[11px] text-muted-foreground mt-1.5">
-                Paleo-Hebrew and Hebrew share a board, so you can switch between them mid-game. Syriac and Arabic each have a board of their own.
+                Paleo-Hebrew and Hebrew share a board, so you can switch between them mid-game. Syriac, Arabic and Ge'ez each have a board of their own.
               </p>
               {pendingScript && (
                 <div className="mt-2 rounded-md border border-border p-3 space-y-2 bg-card">
@@ -654,7 +654,7 @@ const App = () => {
                 <p>Laying the sixth triangle around a letter completes a full point, worth {STAR_BONUS} extra points to whoever lays it.</p>
                 <p>Playing alone, keep going until you drop. Playing apart, start an online game and send the link: everyone sees each move as it happens.</p>
                 <p className="text-xs">
-                  When a root is laid down, the game looks it up in Wiktionary (CC BY-SA 4.0, via kaikki.org), Brown–Driver–Briggs (Hebrew and Aramaic; digital edition by the Open Scriptures Hebrew Bible Project, CC BY 4.0) and Lane's <i>Arabic-English Lexicon</i> (text provided by Perseus Digital Library, with funding from The U.S. Department of Education and The Max Planck Society). A root missing from all three is still fair: they don't cover Akkadian, Ge'ez or the rest.
+                  When a root is laid down, the game looks it up in Wiktionary (CC BY-SA 4.0, via kaikki.org), Brown–Driver–Briggs (Hebrew and Aramaic; digital edition by the Open Scriptures Hebrew Bible Project, CC BY 4.0) and Lane's <i>Arabic-English Lexicon</i> (text provided by Perseus Digital Library, with funding from The U.S. Department of Education and The Max Planck Society). Wiktionary also supplies a few dozen Ge'ez roots; on a Ge'ez board, other roots are looked up through their Hebrew and Arabic counterparts. A root missing from all of them is still fair: none covers Akkadian, Ugaritic or the rest.
                 </p>
                 <a href={ESSAY_URL} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-primary hover:underline">
                   The essay behind the game <ExternalLink className="w-3 h-3" />
@@ -943,7 +943,7 @@ const Composer = (p: ComposerProps) => {
       </div>
 
       {/* Three radical slots, first radical on the right. */}
-      <div dir="rtl" className="flex gap-2 justify-center">
+      <div dir={textDir(game.script)} className="flex gap-2 justify-center">
         {[0, 1, 2].map((i) => (
           <button key={i} onClick={() => p.setRoot(root.slice(0, i))}
             className={`w-16 h-16 rounded-md border-2 grid place-items-center text-3xl transition-colors ${
@@ -958,7 +958,7 @@ const Composer = (p: ComposerProps) => {
       </p>
 
       {/* Letter keys. */}
-      <div dir="rtl" className="flex flex-wrap justify-center gap-1">
+      <div dir={textDir(game.script)} className="flex flex-wrap justify-center gap-1">
         {p.letters.map((l) => (
           <button key={l.id} onClick={() => p.addLetter(l.id)} disabled={full}
             className={`w-[calc((100%-1.5rem)/7)] rounded border py-1 leading-none flex flex-col items-center gap-0.5 hover:bg-secondary disabled:opacity-40 ${
@@ -1003,7 +1003,7 @@ const Composer = (p: ComposerProps) => {
         </button>
       </div>
       <p className="text-[11px] text-muted-foreground leading-snug">
-        Keyboard: type in Hebrew, Syriac or Arabic (either works in any game){game.alphabet !== "arabic" && <>, or Latin (x = ḥ, T = ṭ, c = ṣ, S = š, e = ʿ, a = ʾ)</>}. Enter places, Tab turns, Esc cancels.
+        Keyboard: type in Hebrew, Syriac, Arabic or Ethiopic (any works in any game){LATIN_HINT[game.alphabet] && <>, or Latin ({LATIN_HINT[game.alphabet]})</>}. Enter places, Tab turns, Esc cancels.
       </p>
     </div>
   );
@@ -1089,7 +1089,7 @@ const RootNotes = ({ p }: { p: ComposerProps }) => {
         </div>
       ) : (
         <p className="text-muted-foreground">
-          Not in the Hebrew, Aramaic or Arabic dictionaries. Still fair if it comes from another Semitic language: add its meaning and language below.
+          Not in the dictionaries. Still fair if it comes from another Semitic language: add its meaning and language below.
         </p>
       )}
       <RootExplorer game={game} root={p.root} rootIndex={p.rootIndex} words={p.words} loadWords={p.loadWords} fontFamily={fontFamily} />
@@ -1099,7 +1099,7 @@ const RootNotes = ({ p }: { p: ComposerProps }) => {
           {otherOrders.slice(0, 4).map((o) => (
             <button key={o.root.join("")} onClick={() => p.setRoot(o.root)}
               className="flex w-full items-baseline gap-2 text-left rounded px-1.5 py-1 hover:bg-background/70">
-              <span dir="rtl" className="text-base shrink-0" style={{ fontFamily }}>{o.root.map((l) => glyph(l, game.script)).join(" ")}</span>
+              <span dir={textDir(game.script)} className="text-base shrink-0" style={{ fontFamily }}>{o.root.map((l) => glyph(l, game.script)).join(" ")}</span>
               <span className="text-muted-foreground shrink-0">{rootTranslit(o.root, game)}</span>
               <span className="truncate text-foreground/80">{o.senses[0].gloss}</span>
             </button>
@@ -1131,7 +1131,7 @@ const Hints = ({ p }: { p: ComposerProps }) => {
       {hints.map((h) => (
         <button key={h.root.join("")} onClick={() => p.setRoot(h.root)}
           className="flex w-full items-baseline gap-2 text-left rounded px-1.5 py-1 hover:bg-background/70">
-          <span dir="rtl" className="text-base shrink-0" style={{ fontFamily }}>{h.root.map((l) => glyph(l, game.script)).join(" ")}</span>
+          <span dir={textDir(game.script)} className="text-base shrink-0" style={{ fontFamily }}>{h.root.map((l) => glyph(l, game.script)).join(" ")}</span>
           <span className="text-muted-foreground shrink-0">{rootTranslit(h.root, game)}</span>
           <span className="truncate text-foreground/80">{h.senses[0].gloss}</span>
         </button>

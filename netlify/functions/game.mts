@@ -42,7 +42,7 @@ const randomId = (n: number) => {
 
 const validGame = (g: Game) =>
   g && g.version === 1 && Array.isArray(g.players) && g.players.length >= 2 && g.players.length <= 4 &&
-  Array.isArray(g.moves) && ["canaanite", "syriac", "arabic"].includes(g.alphabet);
+  Array.isArray(g.moves) && ["canaanite", "syriac", "arabic", "geez"].includes(g.alphabet);
 
 export default async (req: Request, _context: Context) => {
   const store = getStore({ name: "games", consistency: "strong" });
